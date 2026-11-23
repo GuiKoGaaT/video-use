@@ -29,6 +29,9 @@ import sys
 from fractions import Fraction
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import progress  # noqa: E402
+
 try:
     from grade import get_preset, auto_grade_for_clip  # same directory
 except Exception:
@@ -757,9 +760,17 @@ def main() -> None:
     out_path = args.output.resolve()
 
     # 1. Extract per-segment (auto-grade per range if EDL grade is "auto")
-    segment_paths = extract_all_segments(
-        edl, edit_dir, preview=args.preview, draft=args.draft, fps=args.fps
-    )
+    out_s = sum(float(r["end"]) - float(r["start"]) for r in edl["ranges"])
+    size = "720" if args.draft else "1080" if args.preview else "1920"
+    progress.ensure(out_path.stem, [
+        {"id": "segments", "label": "Segmentos + grade", "key": f"segments.{size}", "units": round(out_s, 2)},
+        {"id": "composite", "label": "Composição", "key": f"composite.{size}", "units": round(out_s, 2)},
+        {"id": "loudnorm", "label": "Loudnorm", "key": "loudnorm", "units": round(out_s, 2)},
+    ], edit_dir)
+    with progress.stage("segments"):
+        segment_paths = extract_all_segments(
+            edl, edit_dir, preview=args.preview, draft=args.draft, fps=args.fps
+        )
 
     # 2. Concat → base
     if args.draft:
@@ -782,15 +793,21 @@ def main() -> None:
 
     # 4. Composite (overlays + subtitles LAST) → intermediate (pre-loudnorm) path
     overlays = edl.get("overlays") or []
+    progress.begin("composite")
     if args.no_loudnorm:
         # Composite directly to final output
         build_final_composite(base_path, overlays, subs_path, out_path, edit_dir)
+        progress.finish("composite")
+        progress.finish("loudnorm", "skipped")
     else:
         # Composite to a temp file, then run loudnorm → final output
         tmp_composite = out_path.with_suffix(".prenorm.mp4")
         build_final_composite(base_path, overlays, subs_path, tmp_composite, edit_dir)
+        progress.finish("composite")
+        progress.begin("loudnorm")
         print("loudness normalization → social-ready (-14 LUFS / -1 dBTP / LRA 11)")
         apply_loudnorm_two_pass(tmp_composite, out_path, preview=args.draft)
+        progress.finish("loudnorm")
         tmp_composite.unlink(missing_ok=True)
 
     size_mb = out_path.stat().st_size / (1024 * 1024)

@@ -1,0 +1,6 @@
+{
+  "name": "video-progress",
+  "version": "0.1.0",
+  "description": "Painel lateral com o progresso de um vídeo da skill video-use: barra geral e uma barra por etapa, com tempo restante pelas médias históricas.",
+  "types": "./types/index.d.ts"
+}

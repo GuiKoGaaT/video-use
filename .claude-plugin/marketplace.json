@@ -1,0 +1,14 @@
+{
+  "name": "video-use",
+  "description": "video-use versão local (Windows) e o painel de progresso de vídeo para o Claude Code.",
+  "owner": {
+    "name": "GuiKoGaaT"
+  },
+  "plugins": [
+    {
+      "name": "video-progress",
+      "source": "./mods/video-progress",
+      "description": "Painel lateral com o progresso de um vídeo da skill video-use: barra geral e uma barra por etapa, com tempo restante pelas médias históricas."
+    }
+  ]
+}

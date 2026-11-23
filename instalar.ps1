@@ -1,10 +1,9 @@
 # Instala o video-use (versao local: Whisper + recorte de fundo) num PC Windows.
 #
-# Num PC novo, num PowerShell:
-#   winget install --id GitHub.cli -e
+# Num PC novo (ou maquina virtual), num PowerShell:
+#   winget install --id Git.Git -e
 #   (feche e abra o PowerShell)
-#   gh auth login --web
-#   gh repo clone GuiKoGaaT/video-use $HOME\video-use
+#   git clone https://github.com/GuiKoGaaT/video-use $HOME\video-use
 #   powershell -ExecutionPolicy Bypass -File $HOME\video-use\instalar.ps1
 #
 # Pode rodar de novo sem medo: o que ja estiver instalado e pulado.
@@ -12,7 +11,7 @@
 
 $ErrorActionPreference = 'Stop'
 
-# Repositorio de onde vem esta versao. Repo privado: faca 'gh auth login' antes.
+# Repositorio de onde vem esta versao (publico; um fork privado usa o login do gh).
 $Repo = if ($env:VIDEO_USE_REPO) { $env:VIDEO_USE_REPO } else { 'GuiKoGaaT/video-use' }
 $Dest = if ($env:VIDEO_USE_DIR) { $env:VIDEO_USE_DIR } else { Join-Path $HOME 'video-use' }
 $Rvm = Join-Path $HOME 'RobustVideoMatting'
@@ -87,15 +86,17 @@ if (Test-Path (Join-Path $Dest '.git')) {
     git -C $Dest pull --ff-only
     Write-Ok 'atualizado'
 } else {
-    if ($Repo -match '^[\w.-]+/[\w.-]+$' -and (Get-Command gh -ErrorAction SilentlyContinue)) {
-        # owner/name: gh usa o login do GitHub, entao funciona com repo privado
+    $url = if ($Repo -match '^[\w.-]+/[\w.-]+$') { "https://github.com/$Repo" } else { $Repo }
+    $env:GIT_TERMINAL_PROMPT = '0'   # repo publico: nao pede senha; privado cai no gh abaixo
+    $code = Invoke-Quiet { git clone $url $Dest }
+    Remove-Item Env:GIT_TERMINAL_PROMPT
+    if ($code -ne 0 -and $Repo -match '^[\w.-]+/[\w.-]+$' -and (Get-Command gh -ErrorAction SilentlyContinue)) {
+        # repo privado: gh usa o login do GitHub
         if ((Invoke-Quiet { gh auth status }) -ne 0) {
-            Write-Host '    Faca login no GitHub (abre o navegador):' -ForegroundColor Yellow
+            Write-Host '    Repo privado: faca login no GitHub (abre o navegador):' -ForegroundColor Yellow
             gh auth login --hostname github.com --git-protocol https --web
         }
         gh repo clone $Repo $Dest
-    } else {
-        git clone $Repo $Dest
     }
     if ($LASTEXITCODE -ne 0) { throw 'falha ao baixar o video-use' }
     Write-Ok 'baixado'
@@ -110,7 +111,7 @@ try {
 Write-Ok 'dependencias Python'
 
 # ---------------------------------------------------------------- 3. skill
-Write-Step '3/6 Registrar a skill no Claude Code'
+Write-Step '3/6 Registrar a skill e o painel de progresso no Claude Code'
 New-Item -ItemType Directory -Force $Skills | Out-Null
 $link = Join-Path $Skills 'video-use'
 if (Test-Path $link) {
@@ -118,6 +119,42 @@ if (Test-Path $link) {
 } else {
     New-Item -ItemType Junction -Path $link -Target $Dest | Out-Null
     Write-Ok "$link -> $Dest"
+}
+
+# Painel de progresso (mod video-progress): o Claude Code carrega as pastas de
+# CLAUDE_CODE_PLUGIN_DIRS do bloco "env" de ~/.claude/settings.json, no app e no terminal.
+# Fica apontando para o clone, entao um 'git pull' ja atualiza o painel.
+$mod = Join-Path $Dest 'mods\video-progress'
+$settingsPath = Join-Path $HOME '.claude\settings.json'
+try {
+    $settings = if (Test-Path $settingsPath) {
+        Get-Content $settingsPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    } else { New-Object PSObject }
+    if (-not $settings) { $settings = New-Object PSObject }
+    if (-not ($settings.PSObject.Properties.Name -contains 'env')) {
+        $settings | Add-Member -NotePropertyName env -NotePropertyValue (New-Object PSObject)
+    }
+    $dirs = @()
+    if ($settings.env.PSObject.Properties.Name -contains 'CLAUDE_CODE_PLUGIN_DIRS') {
+        $dirs = @($settings.env.CLAUDE_CODE_PLUGIN_DIRS -split ';' | Where-Object { $_ })
+    }
+    if ($dirs -contains $mod) {
+        Write-Ok 'painel de progresso ja registrado'
+    } else {
+        $value = (@($dirs) + $mod) -join ';'
+        if ($settings.env.PSObject.Properties.Name -contains 'CLAUDE_CODE_PLUGIN_DIRS') {
+            $settings.env.CLAUDE_CODE_PLUGIN_DIRS = $value
+        } else {
+            $settings.env | Add-Member -NotePropertyName CLAUDE_CODE_PLUGIN_DIRS -NotePropertyValue $value
+        }
+        if (Test-Path $settingsPath) { Copy-Item $settingsPath "$settingsPath.bak" -Force }
+        $json = $settings | ConvertTo-Json -Depth 20
+        [IO.File]::WriteAllText($settingsPath, $json, (New-Object Text.UTF8Encoding $false))
+        Write-Ok "painel de progresso registrado ($settingsPath; copia em .bak)"
+    }
+} catch {
+    Write-Host "    nao consegui editar $settingsPath ($($_.Exception.Message))." -ForegroundColor Yellow
+    Write-Host '    Instale o painel no Claude Code com: /plugin install video-progress --marketplace GuiKoGaaT/video-use' -ForegroundColor Yellow
 }
 
 # ---------------------------------------------------------------- 4. recorte de fundo

@@ -23,6 +23,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import contextlib
 import array
 import json
 import math
@@ -35,6 +36,9 @@ import wave
 from pathlib import Path
 
 import requests
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import progress  # noqa: E402
 
 
 SCRIBE_URL = "https://api.elevenlabs.io/v1/speech-to-text"
@@ -169,7 +173,22 @@ def transcribe_one(
               f"{audio_track + 1} (--audio-track to change)", flush=True)
 
     t0 = time.time()
-    with tempfile.TemporaryDirectory() as tmp:
+    if backend == "local":
+        try:
+            import torch
+            pkey = "transcribe.local." + ("cuda" if torch.cuda.is_available() else "cpu")
+        except ImportError:
+            pkey = "transcribe.local.cpu"
+    else:
+        pkey = "transcribe.scribe"
+    dur = None
+    with contextlib.suppress(Exception):
+        dur = float(subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration",
+                                    "-of", "csv=p=0", str(video)], capture_output=True,
+                                   text=True).stdout.strip())
+    pstage = progress.stage(f"transcribe:{video.stem}", label=f"Transcrição {video.stem}",
+                            key=pkey, units=round(dur, 2) if dur else None)
+    with pstage, tempfile.TemporaryDirectory() as tmp:
         audio = Path(tmp) / f"{video.stem}.wav"
         extract_audio(video, audio, audio_track)
 

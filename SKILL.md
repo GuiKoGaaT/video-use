@@ -81,13 +81,32 @@ Helpers (`helpers/transcribe.py`, `helpers/render.py`, etc.) live alongside this
 
 For animations, create `<edit>/animations/slot_<id>/` with `Bash` and spawn a sub-agent via the `Agent` tool.
 
+## Progress pane (`progress.py`)
+
+The person follows a job in a Claude Code side pane (mod `video-progress`, command `/video-progresso`): one overall bar with the time left, and one bar per stage. It reads `~/.claude/video-use/progress.json`; estimates come from `~/.claude/video-use/timings.json`, the **median seconds of processing per unit** each stage key has taken before (units: seconds of source for transcribe/matte, seconds of output for segments/composite/loudnorm, 1 per animation slot). Every stage that finishes adds a sample, so estimates get better each session. `progress.py rates` prints them.
+
+- `transcribe.py`, `matte.py` and `render.py` report on their own (`transcribe:<stem>`, `matte:<stem>` with the real frame fraction; `segments`/`composite`/`loudnorm`). A custom build script does the same with `progress.ensure(...)`, `progress.stage(id)` and `progress.run_ffmpeg(cmd, stage_id, total_s)`, which parses ffmpeg's `-progress` for a real fraction.
+- **At the start of execution, plan the whole job** so the overall bar covers what is still to come, not only what is running:
+  ```
+  python helpers/progress.py plan --job <name> --dir <edit> \
+    --stage 'transcribe:<stem>:Transcrição:transcribe.local.cpu:<src_s>' \
+    --stage 'matte:<stem>:Recorte:matte.rvm.cpu:<src_s>' \
+    --stage 'anim:slot_hook:Gancho (HyperFrames):anim.hyperframes:1' \
+    --stage 'segments:Segmentos:segments.1920:<out_s>' \
+    --stage 'composite:Composição:composite.1920:<out_s>' \
+    --stage 'loudnorm:Loudnorm:loudnorm:<out_s>'
+  ```
+  Each `--stage` is `id:label:key:units`, split from the right, so ids may hold a colon. Use the ids the helpers report under (`transcribe:<stem>`, `matte:<stem>`, `segments`, `composite`, `loudnorm`) so their updates land on the planned bars; a helper whose id is not in the plan adds its own bar. Size keys by output height (`segments.960`, `composite.1920`). Mark a cached stage with `progress.py skip <id>`.
+- Steps no helper runs (an animation slot built by a sub-agent, a manual ffmpeg) are bracketed by hand: `progress.py begin anim:slot_hook` before spawning, `progress.py done anim:slot_hook` (or `fail`) when it reports back. Tell sub-agents nothing about this; the parent does it.
+- Progress is best effort: it never raises into the pipeline, and a broken pane never blocks a render.
+
 ## The process
 
 1. **Inventory.** `ffprobe` every source. `transcribe_batch.py` on the directory. `pack_transcripts.py` to produce `takes_packed.md`. Sample one or two `timeline_view`s for a visual first impression.
 2. **Pre-scan for problems.** One pass over `takes_packed.md` to note verbal slips, obvious mis-speaks, or phrasings to avoid. Plain list, feed into the editor brief.
 3. **Converse.** Describe what you see in plain English. Ask questions *shaped by the material*. Collect: content type, target length/aspect, aesthetic/brand direction, pacing feel, must-preserve moments, must-cut moments, animation and grade preferences, subtitle needs. Do not use a fixed checklist — the right questions are different every time.
 4. **Propose strategy.** 4–8 sentences: shape, take choices, cut direction, animation plan, grade direction, subtitle style, length estimate. **Wait for confirmation.**
-5. **Execute.** Produce `edl.json` via the editor sub-agent brief. Drill into `timeline_view` at ambiguous moments. Build animations in parallel sub-agents. Apply grade per-segment. Compose via `render.py`.
+5. **Execute.** Plan the job for the progress pane (`progress.py plan`, see Progress pane). Produce `edl.json` via the editor sub-agent brief. Drill into `timeline_view` at ambiguous moments. Build animations in parallel sub-agents. Apply grade per-segment. Compose via `render.py`.
 6. **Preview.** `render.py --preview`.
 7. **Self-eval (before showing the user).** Run `timeline_view` on the **rendered output** (not the sources) at every cut boundary (±1.5s window). Check each image for:
    - Visual discontinuity / flash / jump at the cut

@@ -37,6 +37,9 @@ from pathlib import Path
 
 import numpy as np
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import progress  # noqa: E402
+
 RVM_DIR = Path(os.environ.get("VIDEO_USE_RVM_DIR", Path.home() / "RobustVideoMatting"))
 
 
@@ -130,7 +133,7 @@ def load_rvm(variant: str):
 
 
 def matte_rvm(video: Path, alpha_out: Path, info: dict, variant: str,
-              downsample: float | None, batch: int = 4) -> None:
+              downsample: float | None, batch: int = 4, st=None) -> None:
     import torch
 
     w, h = info["w"], info["h"]
@@ -173,6 +176,8 @@ def matte_rvm(video: Path, alpha_out: Path, info: dict, variant: str,
             writer.stdin.write(alpha.tobytes())
             done += len(frames)
             now = time.time()
+            if st is not None and total:
+                st.update(done / total)
             if now - last > 2:
                 fps = done / (now - t0)
                 pct = f" {100 * done / total:.0f}%" if total else ""
@@ -229,10 +234,20 @@ def main() -> None:
           f"green {frac:.0%} -> {mode}", flush=True)
 
     if mode == "chroma":
-        print(f"  chromakey {key} similarity {args.similarity} blend {args.blend}", flush=True)
-        matte_chroma(video, alpha_out, key, args.similarity, args.blend)
+        pkey = "matte.chroma"
     else:
-        matte_rvm(video, alpha_out, info, args.variant, args.downsample)
+        try:
+            import torch
+            pkey = "matte.rvm." + ("cuda" if torch.cuda.is_available() else "cpu")
+        except ImportError:
+            pkey = "matte.rvm.cpu"
+    with progress.stage(f"matte:{video.stem}", label=f"Recorte {video.stem}",
+                        key=pkey, units=round(info["duration"], 2)) as st:
+        if mode == "chroma":
+            print(f"  chromakey {key} similarity {args.similarity} blend {args.blend}", flush=True)
+            matte_chroma(video, alpha_out, key, args.similarity, args.blend)
+        else:
+            matte_rvm(video, alpha_out, info, args.variant, args.downsample, st=st)
     print(f"  matte: {alpha_out}")
 
     if args.rgba:

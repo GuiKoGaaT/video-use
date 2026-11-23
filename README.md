@@ -4,7 +4,38 @@
 
 # video-use
 
-> **Versão local (Windows).** Esta cópia transcreve com WhisperX na própria máquina (sem chave da ElevenLabs, idioma `pt`, preserva vícios de fala) e tem `helpers/matte.py` para recorte de fundo (Robust Video Matting ou chromakey). Para instalar num PC novo, veja o topo de [`instalar.ps1`](instalar.ps1). Original: [browser-use/video-use](https://github.com/browser-use/video-use).
+> **Versão local (Windows).** Esta cópia transcreve com WhisperX na própria máquina (sem chave da ElevenLabs, idioma `pt`, preserva vícios de fala), tem `helpers/matte.py` para recorte de fundo (Robust Video Matting ou chromakey) e um **painel de progresso** ao lado do chat do Claude Code. Original: [browser-use/video-use](https://github.com/browser-use/video-use).
+
+## Instalar no Windows (PC ou máquina virtual)
+
+Num PowerShell:
+
+```powershell
+winget install --id Git.Git -e
+```
+
+Feche e abra o PowerShell, depois:
+
+```powershell
+git clone https://github.com/GuiKoGaaT/video-use $HOME\video-use
+powershell -ExecutionPolicy Bypass -File $HOME\video-use\instalar.ps1
+```
+
+O instalador põe Node, Python (uv), FFmpeg, o Whisper local, o recorte de fundo (RVM), o HyperFrames e registra a skill e o painel de progresso no Claude Code. Pode rodar de novo sem medo. Depois abra o Claude Code (app ou terminal) numa pasta com o vídeo e peça a edição.
+
+Precisa de: Windows 10/11 com `winget`, ~15 GB livres, 8 GB de RAM ou mais. Sem placa NVIDIA tudo roda na CPU (mais lento: transcrever leva ~2 s por segundo de vídeo, recortar o fundo ~6,5 s por segundo).
+
+### Painel de progresso (`mods/video-progress`)
+
+Mostra ao lado do chat uma barra geral com o tempo que falta e uma barra por etapa (transcrição, recorte, animações, segmentos, composição, loudnorm). As estimativas vêm da mediana dos tempos que cada etapa já levou **nesta máquina** (`~/.claude/video-use/timings.json`) e melhoram a cada vídeo. Abre sozinho quando um vídeo começa a ser processado, ou com `/video-progresso`.
+
+O `instalar.ps1` já registra o painel. Para instalar só o painel, no terminal do Claude Code:
+
+```
+/plugin install video-progress --marketplace GuiKoGaaT/video-use
+```
+
+No app desktop: clique em **+** ao lado da caixa de mensagem → **Plugins** → **Add marketplace** com `GuiKoGaaT/video-use` → **Add plugin**.
 
 Introducing **video-use** — edit videos with Claude Code. 100% open source.
 
