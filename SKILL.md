@@ -59,7 +59,7 @@ The skill lives in `video-use/`. User footage lives wherever they put it. All se
 
 First-time install lives in `install.md` (clone, deps, ffmpeg, skill registration, API key). Don't re-run it every session; on cold start just verify:
 
-- `ELEVENLABS_API_KEY` resolves — either in the environment or in `.env` at the video-use repo root. If missing, ask the user to paste one and write it to `.env` (never to the user's `<videos_dir>`).
+- Transcription runs **locally with WhisperX** by default (`transcribe_local.py`): no API key, language `pt` unless `--language` says otherwise, `large-v3-turbo` on an NVIDIA GPU, `medium` on CPU. Don't ask for an ElevenLabs key. Only if the user asks for ElevenLabs Scribe (`--backend scribe`) does `ELEVENLABS_API_KEY` need to resolve from the environment or `.env` at the repo root.
 - `ffmpeg` + `ffprobe` on PATH.
 - Python deps installed (`uv sync` or `pip install -e .` inside the repo).
 - Node.js + npm available if the session needs HyperFrames or Remotion slots. HyperFrames currently requires Node.js 22+.
@@ -71,12 +71,13 @@ Helpers (`helpers/transcribe.py`, `helpers/render.py`, etc.) live alongside this
 
 ## Helpers
 
-- **`transcribe.py <video>`** — single-file Scribe call. `--num-speakers N` optional. Cached.
-- **`transcribe_batch.py <videos_dir>`** — 4-worker parallel transcription. Use for multi-take.
+- **`transcribe.py <video>`** — single-file transcription, local WhisperX by default (Silero VAD silences, filler-preserving prompt, wav2vec2 word timestamps), Scribe-shaped JSON. `--language xx` to change from `pt`; `--vocab "ASA, PETG, Marca X"` to spell names/brands/jargon right (pull them from the user's brief or `estilo.md` before transcribing); `--backend scribe` for ElevenLabs. Cached. Local JSON also carries a `silences` list from Silero VAD and has a single speaker (`speaker_0`), no audio events.
+- **`transcribe_batch.py <videos_dir>`** — whole-directory transcription (1 worker local, 4 with Scribe). Use for multi-take.
 - **`pack_transcripts.py --edit-dir <dir>`** — `transcripts/*.json` → `takes_packed.md` (phrase-level, break on silence ≥ 0.5s).
 - **`timeline_view.py <video> <start> <end>`** — filmstrip + waveform PNG. On-demand visual drill-down. **Not a scan tool** — use it at decision points, not constantly.
 - **`render.py <edl.json> -o <out>`** — per-segment extract → concat → overlays (PTS-shifted) → subtitles LAST. `--preview` for 720p fast. `--build-subtitles` to generate master.srt inline.
 - **`grade.py <in> -o <out>`** — ffmpeg filter chain grade. Presets + `--filter '<raw>'` for custom.
+- **`matte.py <video>`** — alpha matte (person white, background black) → `<edit>/mattes/<stem>_alpha.mp4`, same size/fps/length as the source. Auto-detects green screen (FFmpeg chromakey on the measured green); otherwise Robust Video Matting locally (`~/RobustVideoMatting`, ~12 fps on CPU at 540×960). `--rgba` also writes ProRes 4444 with alpha. Use for background swaps and text-behind-the-speaker: `[matte]format=gray[a];[src][a]alphamerge[fg];[bg][fg]overlay`. Run it on the trimmed segment, not the whole take, to save time.
 
 For animations, create `<edit>/animations/slot_<id>/` with `Bash` and spawn a sub-agent via the `Agent` tool.
 
@@ -328,7 +329,7 @@ Things that consistently fail regardless of style:
 - **Hierarchical pre-computed codec formats** with USABILITY / tone tags / shot layers. Over-engineering. Derive from the transcript at decision time.
 - **Hand-tuned moment-scoring functions.** The LLM picks better than any heuristic you'll write.
 - **Whisper SRT / phrase-level output.** Loses sub-second gap data. Always word-level verbatim.
-- **Running Whisper locally on CPU.** Slow and it normalizes fillers. Use hosted Scribe.
+- **Plain Whisper without the local adapter.** It normalizes fillers and drifts on word times. Always go through `transcribe.py`, which adds the filler prompt, Silero VAD and forced alignment.
 - **Burning subtitles into base before compositing overlays.** Overlays hide them. (Hard Rule 1.)
 - **Single-pass filtergraph when you have overlays.** Double re-encodes. Use per-segment extract → concat.
 - **Linear animation easing.** Looks robotic. Always cubic.

@@ -1,7 +1,11 @@
-"""Batch-transcribe every video in a directory with 4 parallel workers.
+"""Batch-transcribe every video in a directory.
 
-Walks <videos_dir> for common video extensions, runs ElevenLabs Scribe on
-each, writes transcripts to <videos_dir>/edit/transcripts/<name>.json.
+Walks <videos_dir> for common video extensions, transcribes each (local
+WhisperX by default, or ElevenLabs Scribe with --backend scribe), writes
+transcripts to <videos_dir>/edit/transcripts/<name>.json.
+
+Local runs one file at a time (one model in memory); Scribe uses 4 parallel
+uploads by default.
 
 Cached per-file: any source that already has a transcript is skipped.
 
@@ -20,7 +24,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-from transcribe import load_api_key, transcribe_one, transcript_path
+from transcribe import BACKENDS, DEFAULT_BACKEND, load_api_key, transcribe_one, transcript_path
 
 
 VIDEO_EXTS = {".mp4", ".MP4", ".mov", ".MOV", ".mkv", ".MKV", ".avi", ".AVI", ".m4v"}
@@ -43,7 +47,16 @@ def main() -> None:
         default=None,
         help="Edit output directory (default: <videos_dir>/edit)",
     )
-    ap.add_argument("--workers", type=int, default=4, help="Parallel workers (default: 4)")
+    ap.add_argument(
+        "--backend",
+        choices=BACKENDS,
+        default=DEFAULT_BACKEND,
+        help="local = WhisperX on this machine (default); scribe = ElevenLabs API.",
+    )
+    ap.add_argument("--vocab", type=str, default=None,
+                    help="Local backend: comma-separated names/brands/jargon to spell right.")
+    ap.add_argument("--workers", type=int, default=None,
+                    help="Parallel workers (default: 1 for local, 4 for scribe)")
     ap.add_argument(
         "--language",
         type=str,
@@ -84,13 +97,14 @@ def main() -> None:
         print("nothing to do")
         return
 
-    api_key = load_api_key()
+    api_key = load_api_key() if args.backend == "scribe" else None
+    workers = args.workers or (1 if args.backend == "local" else 4)
 
-    print(f"transcribing {len(pending)} files with {args.workers} parallel workers")
+    print(f"transcribing {len(pending)} files ({args.backend}) with {workers} worker(s)")
     t0 = time.time()
 
     errors: list[tuple[Path, str]] = []
-    with ThreadPoolExecutor(max_workers=args.workers) as pool:
+    with ThreadPoolExecutor(max_workers=workers) as pool:
         futures = {
             pool.submit(
                 transcribe_one,
@@ -101,6 +115,8 @@ def main() -> None:
                 num_speakers=args.num_speakers,
                 verbose=False,
                 audio_track=args.audio_track,
+                backend=args.backend,
+                vocab=args.vocab,
             ): v
             for v in pending
         }

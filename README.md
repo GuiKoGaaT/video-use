@@ -4,6 +4,8 @@
 
 # video-use
 
+> **Versão local (Windows).** Esta cópia transcreve com WhisperX na própria máquina (sem chave da ElevenLabs, idioma `pt`, preserva vícios de fala) e tem `helpers/matte.py` para recorte de fundo (Robust Video Matting ou chromakey). Para instalar num PC novo, veja o topo de [`instalar.ps1`](instalar.ps1). Original: [browser-use/video-use](https://github.com/browser-use/video-use).
+
 Introducing **video-use** — edit videos with Claude Code. 100% open source.
 
 Drop raw footage in a folder, chat with Claude Code, get `final.mp4` back. Works for any content — talking heads, montages, tutorials, travel, interviews — without presets or menus.

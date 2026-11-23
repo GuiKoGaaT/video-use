@@ -1,16 +1,23 @@
-"""Transcribe a video with ElevenLabs Scribe.
+"""Transcribe a video to word-level JSON.
 
-Extracts mono 16kHz audio via ffmpeg, uploads to Scribe with verbatim +
-diarize + audio events + word-level timestamps, writes the full response
-to <edit_dir>/transcripts/<video_stem>.json.
+Extracts mono 16kHz audio via ffmpeg, then transcribes it with one of two
+backends and writes Scribe-shaped JSON to <edit_dir>/transcripts/<video_stem>.json.
 
-Cached: if the output file already exists, the upload is skipped.
+  local  (default) WhisperX on this machine: Silero VAD, filler-preserving
+         prompt, wav2vec2 word alignment. Free, no API key. Language defaults
+         to pt. See transcribe_local.py.
+  scribe ElevenLabs Scribe (needs ELEVENLABS_API_KEY): diarization and
+         audio events, paid per minute.
+
+Pick with --backend or the VIDEO_USE_TRANSCRIBE_BACKEND environment variable.
+
+Cached: if the output file already exists, transcription is skipped.
 
 Usage:
     python helpers/transcribe.py <video_path>
     python helpers/transcribe.py <video_path> --edit-dir /custom/edit
     python helpers/transcribe.py <video_path> --language en
-    python helpers/transcribe.py <video_path> --num-speakers 2
+    python helpers/transcribe.py <video_path> --backend scribe --num-speakers 2
 """
 
 from __future__ import annotations
@@ -31,6 +38,10 @@ import requests
 
 
 SCRIBE_URL = "https://api.elevenlabs.io/v1/speech-to-text"
+
+BACKENDS = ("local", "scribe")
+DEFAULT_BACKEND = os.environ.get("VIDEO_USE_TRANSCRIBE_BACKEND", "local")
+DEFAULT_LOCAL_LANGUAGE = "pt"
 
 
 def load_api_key() -> str:
@@ -128,11 +139,13 @@ def transcript_path(edit_dir: Path, video: Path, audio_track: int = 0) -> Path:
 def transcribe_one(
     video: Path,
     edit_dir: Path,
-    api_key: str,
+    api_key: str | None = None,
     language: str | None = None,
     num_speakers: int | None = None,
     verbose: bool = True,
     audio_track: int = 0,
+    backend: str = DEFAULT_BACKEND,
+    vocab: str | None = None,
 ) -> Path:
     """Transcribe a single video. Returns path to transcript JSON.
 
@@ -172,10 +185,17 @@ def transcribe_one(
                    if n_tracks > 1 else "Check the source audio.")
             )
 
-        size_mb = audio.stat().st_size / (1024 * 1024)
-        if verbose:
-            print(f"  uploading {video.stem}.wav ({size_mb:.1f} MB)", flush=True)
-        payload = call_scribe(audio, api_key, language, num_speakers)
+        if backend == "local":
+            from transcribe_local import transcribe_local
+
+            if verbose:
+                print(f"  transcribing {video.stem} locally (WhisperX)", flush=True)
+            payload = transcribe_local(audio, language or DEFAULT_LOCAL_LANGUAGE, vocab)
+        else:
+            size_mb = audio.stat().st_size / (1024 * 1024)
+            if verbose:
+                print(f"  uploading {video.stem}.wav ({size_mb:.1f} MB)", flush=True)
+            payload = call_scribe(audio, api_key or load_api_key(), language, num_speakers)
 
     out_path.write_text(json.dumps(payload, indent=2))
     dt = time.time() - t0
@@ -190,8 +210,21 @@ def transcribe_one(
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="Transcribe a video with ElevenLabs Scribe")
+    ap = argparse.ArgumentParser(description="Transcribe a video (local WhisperX or ElevenLabs Scribe)")
     ap.add_argument("video", type=Path, help="Path to video file")
+    ap.add_argument(
+        "--backend",
+        choices=BACKENDS,
+        default=DEFAULT_BACKEND,
+        help="local = WhisperX on this machine (default); scribe = ElevenLabs API.",
+    )
+    ap.add_argument(
+        "--vocab",
+        type=str,
+        default=None,
+        help="Local backend: comma-separated names/brands/jargon to spell right "
+             "(e.g. \"ASA, PETG, FDM Racing Parts\").",
+    )
     ap.add_argument(
         "--edit-dir",
         type=Path,
@@ -202,7 +235,8 @@ def main() -> None:
         "--language",
         type=str,
         default=None,
-        help="Optional ISO language code (e.g., 'en'). Omit to auto-detect.",
+        help="Optional ISO language code (e.g., 'en'). Local backend defaults to 'pt'; "
+             "Scribe auto-detects when omitted.",
     )
     ap.add_argument(
         "--num-speakers",
@@ -225,7 +259,7 @@ def main() -> None:
         sys.exit(f"video not found: {video}")
 
     edit_dir = (args.edit_dir or (video.parent / "edit")).resolve()
-    api_key = load_api_key()
+    api_key = load_api_key() if args.backend == "scribe" else None
 
     transcribe_one(
         video=video,
@@ -234,6 +268,8 @@ def main() -> None:
         language=args.language,
         num_speakers=args.num_speakers,
         audio_track=args.audio_track,
+        backend=args.backend,
+        vocab=args.vocab,
     )
 
 
